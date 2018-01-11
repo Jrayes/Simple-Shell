@@ -3,53 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-
-void simple_shell(){
-    int status;
-    char ** args = malloc(5 * sizeof(char *));
-    for(int i=0; i < 5; i++){
-
-        *(args + i) = malloc(5 * sizeof(char));
-
-
-    }
-
-    size_t buffer_size = MAX_INPUT_SIZE;
-
-    char *input = malloc(sizeof(char) * MAX_INPUT_SIZE);
-
-    if(input == NULL){
-
-        return;
-    }
-
-    do {
-
-        printf("> ");
-
-        getline(&input, &buffer_size, stdin);
-
-        tokenize(input);
-
-        status = execute_commands(args);
-
-
-        //exit is the only built-in added by default.
-        switch (status){
-            case FAILED:
-                printf("Command not found");
-                break;
-            case EXIT:
-                printf("Exiting shell..\n");
-                break;
-
-        }
-
-    } while(status);
-
-
-
-}
+#include <unistd.h>
 
 /*
  *
@@ -80,15 +34,111 @@ char *trimwhitespace(char *str)
 }
 
 /*
+ * Read a line of input from stdin.
+ *
+ */
+
+char * read_line() {
+
+    char *buffer = malloc(sizeof(char) * MAX_INPUT_SIZE);
+    int position = 0;
+    char c = getchar();
+    int max_input_size = MAX_INPUT_SIZE;
+    while(c != '\n') {
+
+        if(position == max_input_size - 1) {
+
+            char *temp = malloc(strlen(buffer));
+
+            strcpy(temp, buffer);
+
+            buffer = malloc(strlen(buffer) * 2);
+
+            strcpy(buffer, temp);
+
+            max_input_size = max_input_size * 2;
+
+            buffer[position] = c;
+
+            position++;
+
+        }
+
+        else {
+
+            buffer[position] = c;
+
+            position++;
+
+        }
+
+        c = getchar();
+    }
+
+    buffer[position] = 0;
+
+    return buffer;
+
+}
+
+void simple_shell(){
+
+    do {
+
+
+        char *input = malloc(sizeof(char) * MAX_INPUT_SIZE);
+
+        if(input == NULL){
+
+            return;
+        }
+
+        char ** args = malloc(MAX_TOKENS * sizeof(char *));
+
+        /*
+         * Initialize argument array
+         *
+         */
+
+        //implement a log?
+        if(args == NULL){
+
+            return;
+        }
+
+        printf("> ");
+
+        input = read_line();
+
+        tokenize(input, args);
+
+        //reset the code to normal before each iteration.
+
+        execute_commands(args);
+
+        free(input);
+
+        free(args);
+
+        //exit is the only built-in added by default.
+
+    } while(1);
+
+
+}
+
+
+/*
  * Tokenize an input stream given to the shell.
  * @param *input
  * @returns char **args (a character array of commands)
  */
 
-char** tokenize(char *input) {
+char** tokenize(char *input, char **args) {
 
     char *delim = malloc(sizeof(char) * 2);
     char *token;
+    char *new_token;
     //implement a log?
     if(delim == NULL){
 
@@ -97,20 +147,6 @@ char** tokenize(char *input) {
 
     delim = " ";
 
-
-    /*
-     * Initialize argument array
-     *
-     */
-    char ** args = malloc(MAX_TOKENS * sizeof(char *));
-
-    //implement a log?
-    if(args == NULL){
-
-        return NULL;
-    }
-
-
     token = strtok(input, delim);
 
     int num_tokens = 0;
@@ -118,7 +154,7 @@ char** tokenize(char *input) {
     while(token != NULL) {
 
 
-        char *new_token = malloc(strlen(token));
+        new_token = malloc(strlen(token));
 
         new_token = trimwhitespace(token);
 
@@ -131,7 +167,9 @@ char** tokenize(char *input) {
         num_tokens++;
     }
 
+
     if(num_tokens < MAX_TOKENS) {
+
         char **new_args = malloc(num_tokens * sizeof(char *));
 
         for(int i = 0; i < num_tokens; i++) {
@@ -139,12 +177,14 @@ char** tokenize(char *input) {
            *(new_args + num_tokens) = *(args + num_tokens);
         }
 
-        free(args);
+        args = malloc(num_tokens * sizeof(char *));
 
-        return new_args;
+        args = new_args;
+
     }
 
     return args;
+
 
 }
 
@@ -153,9 +193,43 @@ char** tokenize(char *input) {
  * @param args
  *
  */
-int execute_commands(char **args){
-    
-    return 0;
+void execute_commands(char **args) {
+
+    pid_t pid, wpid;
+
+    pid = fork();
+
+    int status;
+
+    //best way will be to suppress file descriptor.
+
+    if (pid == 0) {
+        // Child process
+        //in general make sure that we don't print this for any built-in's.
+        if (execvp(args[0], args) == -1 && strncmp(args[0],"exit",strlen("exit"))) {
+
+            //we'll write any additional error codes to file. We'll include a timestamp, and the command executed.
+            perror("Command not found\n");
+
+        }
+
+        exit(EXIT_CODE);
+    } else if (pid < 0) {
+        // Error forking
+        perror("Error forking process\n");
+
+    } else {
+        // Parent process
+        do {
+            if(!strncmp(args[0],"exit",strlen("exit"))){
+                printf("Exiting shell...\n");
+                exit(0);
+            }
+            wpid = waitpid(pid, &status, WUNTRACED);
+        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+    }
+
+
 }
 /*
  * Interface for adding built-in's.
@@ -166,5 +240,18 @@ void add_shell_builtins(char **builtins){
 
     struct current_builtins currentBuiltins;
 
+
+}
+/*
+ * Checks all allocated data structures and garbage collects, any unused ones.
+ *
+ */
+void collect(char ** unused_structures, int length) {
+    for(int i=0; i < length; i++){
+
+        free(*(unused_structures + i));
+    }
+
+    free(unused_structures);
 
 }
