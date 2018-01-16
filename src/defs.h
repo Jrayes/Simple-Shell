@@ -1,8 +1,8 @@
 #define FAILED -2
 #define EXIT -1
 #define EXIT_CODE 1
-#define MAX_INPUT_SIZE 10
-#define MAX_TOKENS 5
+#define MAX_INPUT_SIZE 100
+#define MAX_TOKENS 50
 #define MAX_ALLOWABLE_JOBS 10
 struct current_builtins {
 
@@ -24,9 +24,15 @@ struct process {
 
 };
 
+struct termios {
+
+};
+
 void simple_shell();
 
 char **tokenize(char *input, char **args);
 
-void execute_commands(char **args);
+int execute_commands(char **args);
+
+void init_shell();
 

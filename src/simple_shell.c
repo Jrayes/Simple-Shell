@@ -4,7 +4,12 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <signal.h>
 
+pid_t shell_pgid;
+struct termios shell_tmodes;
+int shell_terminal;
+int shell_is_interactive;
 /*
  *
  * Trim leading and trailing whitespace for the token
@@ -44,7 +49,7 @@ char * read_line() {
     int position = 0;
     char c = getchar();
     int max_input_size = MAX_INPUT_SIZE;
-    while(c != '\n') {
+    while(c != '\n' && c != EOF) {
 
         if(position == max_input_size - 1) {
 
@@ -83,47 +88,42 @@ char * read_line() {
 
 void simple_shell(){
 
-    do {
 
+        char *input;
+        char **args;
+        do {
 
-        char *input = malloc(sizeof(char) * MAX_INPUT_SIZE);
+            input = malloc(sizeof(char) * MAX_INPUT_SIZE);
+            /*
+            * Initialize argument array
+            *
+            */
+            args = malloc(MAX_TOKENS * sizeof(char *));
 
-        if(input == NULL){
+           if(input == NULL || args == NULL){
 
-            return;
-        }
+               exit(1);
+           }
 
-        char ** args = malloc(MAX_TOKENS * sizeof(char *));
+            //implement a log?
 
-        /*
-         * Initialize argument array
-         *
-         */
+            printf("> ");
 
-        //implement a log?
-        if(args == NULL){
+            input = read_line();
 
-            return;
-        }
+            tokenize(input, args);
 
-        printf("> ");
+            //reset the code to normal before each iteration.
 
-        input = read_line();
+            execute_commands(args);
 
-        tokenize(input, args);
+            free(input);
 
-        //reset the code to normal before each iteration.
+            free(args);
 
-        execute_commands(args);
+            //exit is the only built-in added by default.
 
-        free(input);
-
-        free(args);
-
-        //exit is the only built-in added by default.
-
-    } while(1);
-
+        } while(1);
 
 }
 
@@ -137,22 +137,21 @@ void simple_shell(){
 char** tokenize(char *input, char **args) {
 
     char *delim = malloc(sizeof(char) * 2);
-    char *token;
     char *new_token;
     //implement a log?
-    if(delim == NULL){
 
-        return NULL;
+    if(delim == NULL) {
+
+        exit(EXIT_FAILURE);
     }
 
     delim = " ";
 
-    token = strtok(input, delim);
+    char *token = strtok(input, delim);
 
     int num_tokens = 0;
 
     while(token != NULL) {
-
 
         new_token = malloc(strlen(token));
 
@@ -183,8 +182,8 @@ char** tokenize(char *input, char **args) {
 
     }
 
-    return args;
 
+    return args;
 
 }
 
@@ -193,7 +192,7 @@ char** tokenize(char *input, char **args) {
  * @param args
  *
  */
-void execute_commands(char **args) {
+int execute_commands(char **args) {
 
     pid_t pid, wpid;
 
@@ -206,14 +205,15 @@ void execute_commands(char **args) {
     if (pid == 0) {
         // Child process
         //in general make sure that we don't print this for any built-in's.
-        if (execvp(args[0], args) == -1 && strncmp(args[0],"exit",strlen("exit"))) {
+
+        if (execvp(args[0], args) == -1 && strncmp(args[0],"exit",strlen("exit")) != 0) {
 
             //we'll write any additional error codes to file. We'll include a timestamp, and the command executed.
             perror("Command not found\n");
 
         }
 
-        exit(EXIT_CODE);
+        exit(EXIT_FAILURE);
     } else if (pid < 0) {
         // Error forking
         perror("Error forking process\n");
@@ -221,16 +221,69 @@ void execute_commands(char **args) {
     } else {
         // Parent process
         do {
-            if(!strncmp(args[0],"exit",strlen("exit"))){
+
+            //make sure the parent is running in the foreground.
+
+
+            if(strncmp(args[0],"exit",strlen("exit")) == 0){
                 printf("Exiting shell...\n");
-                exit(0);
+                exit(EXIT_SUCCESS);
             }
+
+
+
             wpid = waitpid(pid, &status, WUNTRACED);
+
         } while (!WIFEXITED(status) && !WIFSIGNALED(status));
     }
 
+    return 1;
 
 }
+
+/*
+ * Ensure that shell is running interactively as the foreground job
+ * This should be for use only when shell is invoked as a job by parent.
+ *
+ */
+
+void init_shell() {
+
+    /* See if we are running interactively.  */
+    shell_terminal = STDIN_FILENO;
+    shell_is_interactive = isatty (shell_terminal);
+
+    if (shell_is_interactive)
+    {
+        /* Loop until we are in the foreground.  */
+        while (tcgetpgrp (shell_terminal) != (shell_pgid = getpgrp ()))
+            kill (- shell_pgid, SIGTTIN);
+
+        /* Ignore interactive and job-control signals.  */
+        signal (SIGINT, SIG_IGN);
+        signal (SIGQUIT, SIG_IGN);
+        signal (SIGTSTP, SIG_IGN);
+        signal (SIGTTIN, SIG_IGN);
+        signal (SIGTTOU, SIG_IGN);
+        signal (SIGCHLD, SIG_IGN);
+
+        /* Put ourselves in our own process group.  */
+        shell_pgid = getpid ();
+        if (setpgid (shell_pgid, shell_pgid) < 0)
+        {
+            perror ("Couldn't put the shell in its own process group");
+            exit (1);
+        }
+
+        /* Grab control of the terminal.  */
+        tcsetpgrp (shell_terminal, shell_pgid);
+
+        /* Save default terminal attributes for shell.  */
+        //tcgetattr (shell_terminal, &shell_tmodes);
+    }
+
+}
+
 /*
  * Interface for adding built-in's.
  * If the code is defined in a module with a specific name, we will load it.
