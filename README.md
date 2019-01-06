@@ -1,8 +1,8 @@
 # Simple-Shell
-A C shell.
+A C shell with job control.
 
 # Working with the source
-git clone 
+git clone git@github.com:Jrayes/Simple-Shell.git
 
 # Run
 
